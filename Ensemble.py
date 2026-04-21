@@ -4,13 +4,14 @@ import sys
 import pandas as pd
 from astropy import time, coordinates as co, units as u
 import os
+import glob
 
 def weighted_mean(values, weights,axis=None):
     return np.nansum(values * weights,axis) / np.nansum(weights,axis)
 
 
 class Ensemble():
-    def __init__(self, config=None, save_path = '.', diagnostics = False):
+    def __init__(self, config=None, save_path = None, diagnostics = False,):
         self.save_path = save_path
         self.diagnostics = diagnostics
         self.open_df = pd.DataFrame()
@@ -18,15 +19,37 @@ class Ensemble():
         
         # self.location = 'TNO' #None    #site name or 'Alt Az Elv'
         self.location = co.EarthLocation.of_site('TNO')
-        # self.src_pos = 
         self.src_pos = co.SkyCoord('06 45 08.92 -16 42 58.0', unit=(u.hourangle, u.deg))
         self.exc_frame = None
         self.sigma_clip = 3
-        self.diagnostics=diagnostics
+        self.diagnostics = diagnostics
         
         if config:
             self.read_config_file(config)
-        
+            
+        if save_path :
+            self.save_path, self.figs_dir = self.makedir()
+
+
+            
+    def makedir(self):
+            base_name = "run"
+            existing_runs = glob.glob(f"{base_name}[0-9][0-9][0-9]")
+            
+            if not existing_runs:
+                next_run_num = 1
+            else:
+                run_numbers = [int(r.replace(base_name, "")) for r in existing_runs]
+                next_run_num = max(run_numbers) + 1
+                
+            current_run_dir = f"{base_name}{next_run_num:03d}"
+            figs_dir = os.path.join(current_run_dir, "figs")
+            
+            os.makedirs(figs_dir, exist_ok=True)
+            print(f"[New Experiment] Created directory: {current_run_dir}")
+            
+            return current_run_dir, figs_dir
+    
     def read_config_file(self, config):
         try:
             with open(config, 'r') as conf:
@@ -133,7 +156,6 @@ class Ensemble():
                 if col in self.open_df.columns:
                     self.open_df.loc[bad_data_mask, col] = np.nan
                 
-        # print(f"Filtering complete: Bad data (flag != 0) replaced with NaN.")
 
     def get_instrumental_mags(self, data, diagnostics=False):
         nstars = len([c for c in self.open_df.columns if c.startswith('counts_')])
@@ -177,9 +199,6 @@ class Ensemble():
     def solve_ensemble(self, data, ):
         mag_cols = [c for c in data.columns if c.startswith('instrumag_')]
         err_cols = [c for c in data.columns if c.startswith('einstrumag_')]
-        # err_cols = [c.replace('instrumag_', 'einstrumag_') for c in mag_cols]
-        
-
         m_obs = data[mag_cols].values
         err_obs = data[err_cols].values
 
@@ -276,7 +295,7 @@ class Ensemble():
             fig, axes = plt.subplots(nrows, ncols, figsize=(20, nrows * 3.5), sharex=True)
             if n_stars == 1: axes = [axes] # Handle case with only 1 star
             axes = axes.flatten()
-            print(f"📊 Analyzing & Plotting {n_stars} stars for variability...")
+            print(f" Analyzing & Plotting {n_stars} stars for variability...")
 
 
         for i, target_col in enumerate(mag_cols):
@@ -317,80 +336,88 @@ class Ensemble():
             fig.suptitle('Ensemble Residual Diagnostics (Target Star vs. Others Mean)', 
                          fontsize=22, fontweight='bold', y=1.02)
             plt.tight_layout()
+            if hasattr(self, 'figs_dir') and self.figs_dir:
+                # Using a counter ensures that each step of the cleaning process is recorded
+                iter_val = getattr(self, 'iteration_counter', 0)
+                save_name = os.path.join(self.figs_dir, f'variability_step_{iter_val:03d}.png')
+                plt.savefig(save_name, dpi=300, bbox_inches='tight')
+            # --- Save logic end ---
+            
             plt.show()
 
 
         return dict(sorted(variability_results.items(), key=lambda item: item[1], reverse=True))
         
     
-    def filter_by_sky(self, df, tolerance=0.03):
-        import matplotlib.pyplot as plt
-        import numpy as np
+    # def filter_by_sky(self, df, tolerance=0.03):
+    #     import matplotlib.pyplot as plt
+    #     import numpy as np
 
-        lower_limit = 1.0 - tolerance
-        upper_limit = 1.0 + tolerance
+    #     lower_limit = 1.0 - tolerance
+    #     upper_limit = 1.0 + tolerance
         
-        sky_cols = [c for c in df.columns if c.startswith('sky_')]
-        if not sky_cols:
-            return []
+    #     sky_cols = [c for c in df.columns if c.startswith('sky_')]
+    #     if not sky_cols:
+    #         return []
 
-        median_sky_rate = df[sky_cols].median(axis=1) / df['Exptim']
-        stars_to_drop = []
-        star_diagnostics_data = {}
+    #     median_sky_rate = df[sky_cols].median(axis=1) / df['Exptim']
+    #     stars_to_drop = []
+    #     star_diagnostics_data = {}
 
-        for col in sky_cols:
-            star_num = col.split('_')[1]
-            star_sky_rate = df[col] / df['Exptim']
-            ratio_series = star_sky_rate / median_sky_rate
-            rel_sky_med = ratio_series.median()
+    #     for col in sky_cols:
+    #         star_num = col.split('_')[1]
+    #         star_sky_rate = df[col] / df['Exptim']
+    #         ratio_series = star_sky_rate / median_sky_rate
+    #         rel_sky_med = ratio_series.median()
             
-            star_diagnostics_data[star_num] = {
-                'series': ratio_series,
-                'median': rel_sky_med
-            }
+    #         star_diagnostics_data[star_num] = {
+    #             'series': ratio_series,
+    #             'median': rel_sky_med
+    #         }
 
            
-            if rel_sky_med < lower_limit or rel_sky_med > upper_limit:
-                stars_to_drop.append(star_num)
+    #         if rel_sky_med < lower_limit or rel_sky_med > upper_limit:
+    #             stars_to_drop.append(star_num)
 
-        if getattr(self, 'diagnostics', False):
-            n_stars = len(sky_cols)
-            ncols = 4
-            nrows = int(np.ceil(n_stars / ncols))
-            fig, axes = plt.subplots(nrows, ncols, figsize=(20, nrows * 3.5), sharex=True)
-            axes = axes.flatten()
+    #     if getattr(self, 'diagnostics', False):
+    #         n_stars = len(sky_cols)
+    #         ncols = 4
+    #         nrows = int(np.ceil(n_stars / ncols))
+    #         fig, axes = plt.subplots(nrows, ncols, figsize=(20, nrows * 3.5), sharex=True)
+    #         axes = axes.flatten()
 
-            for i, (star_num, info) in enumerate(star_diagnostics_data.items()):
-                ax = axes[i]
-                rel_sky = info['median']
+    #         for i, (star_num, info) in enumerate(star_diagnostics_data.items()):
+    #             ax = axes[i]
+    #             rel_sky = info['median']
                 
-                ax.plot(df.index, info['series'], color='seagreen', lw=0.8, alpha=0.5)
+    #             ax.plot(df.index, info['series'], color='seagreen', lw=0.8, alpha=0.5)
                 
-                ax.axhline(upper_limit, color='crimson', ls='-', lw=1, alpha=0.5, label=f'+{tolerance}')
-                ax.axhline(lower_limit, color='crimson', ls='-', lw=1, alpha=0.5, label=f'-{tolerance}')
-                ax.axhline(1.0, color='black', ls=':', alpha=0.8)
+    #             ax.axhline(upper_limit, color='crimson', ls='-', lw=1, alpha=0.5, label=f'+{tolerance}')
+    #             ax.axhline(lower_limit, color='crimson', ls='-', lw=1, alpha=0.5, label=f'-{tolerance}')
+    #             ax.axhline(1.0, color='black', ls=':', alpha=0.8)
 
-                ax.axhline(rel_sky, color='darkorange', ls='--', lw=1.5)
+    #             ax.axhline(rel_sky, color='darkorange', ls='--', lw=1.5)
 
-                ax.set_title(f"Star {star_num}\nRatio: {rel_sky:.3f}", fontsize=10, fontweight='bold')
+    #             ax.set_title(f"Star {star_num}\nRatio: {rel_sky:.3f}", fontsize=10, fontweight='bold')
 
-                if rel_sky < lower_limit or rel_sky > upper_limit:
-                    ax.set_facecolor('#fff0f0') 
-                    ax.title.set_color('crimson')
+    #             if rel_sky < lower_limit or rel_sky > upper_limit:
+    #                 ax.set_facecolor('#fff0f0') 
+    #                 ax.title.set_color('crimson')
 
-            for j in range(i + 1, len(axes)):
-                fig.delaxes(axes[j])
+    #         for j in range(i + 1, len(axes)):
+    #             fig.delaxes(axes[j])
 
-            fig.suptitle(f'Symmetric Sky Diagnostics ($1.0 \\pm {tolerance}$)', fontsize=22, fontweight='bold', y=1.02)
-            plt.tight_layout()
-            plt.show()
+    #         fig.suptitle(f'Symmetric Sky Diagnostics ($1.0 \\pm {tolerance}$)', fontsize=22, fontweight='bold', y=1.02)
+    #         plt.tight_layout()
+            
+    #         plt.show()
 
-        return stars_to_drop
+    #     return stars_to_drop
 
         
     def filter_by_sky(self, df, tolerance=0.03):
 
-        lower_limit = 1.0 - tolerance
+        lower_limit = 1.0 - tolerance 
         upper_limit = 1.0 + tolerance
         sky_cols = [c for c in df.columns if c.startswith('sky_')]
         if not sky_cols: return []
@@ -463,6 +490,9 @@ class Ensemble():
             
             fig.suptitle(rf'Sky Point-by-Point Cleaning ($\pm {tolerance}$)', fontsize=22, y=1.02)
             plt.tight_layout()
+            if self.figs_dir:
+                save_name = os.path.join(self.figs_dir, 'sky_diagnostics.png')
+                plt.savefig(save_name, dpi=300, bbox_inches='tight')
             plt.show()
         
         return stars_to_drop_entirely
@@ -502,109 +532,113 @@ class Ensemble():
             plt.ylabel('Contrast Ratio (Log Scale)')
             plt.xlabel('Star ID')
             plt.legend()
+            if self.figs_dir:
+                save_name = os.path.join(self.figs_dir, 'contrast_ratio_diagnostics.png')
+                plt.savefig(save_name, dpi=300, bbox_inches='tight')
+                
             plt.show()
 
         return stars_to_drop
 
     
-    def plot_comparison_lr(self, star_id):
-        raw_col = f'instrumag_{star_id}'
-        real_col = f'realmag_{star_id}'
+    # def plot_comparison_lr(self, star_id):
+    #     raw_col = f'instrumag_{star_id}'
+    #     real_col = f'realmag_{star_id}'
         
        
-        if raw_col not in self.df_keep.columns:
-            print(f"not found {star_id}")
-            return
+    #     if raw_col not in self.df_keep.columns:
+    #         print(f"not found {star_id}")
+    #         return
 
-        # --- LEFT PLOT: (Relative Mag) ---
-        raw_data = self.df_keep[raw_col].dropna()
-        raw_norm = raw_data - raw_data.median() 
-        raw_rms = np.nanstd(raw_norm)
+    #     # --- LEFT PLOT: (Relative Mag) ---
+    #     raw_data = self.df_keep[raw_col].dropna()
+    #     raw_norm = raw_data - raw_data.median() 
+    #     raw_rms = np.nanstd(raw_norm)
 
 
-        if hasattr(self, 'real_mag_data') and real_col in self.real_mag_data.columns:
-            has_cal = True
-            cal_data = self.real_mag_data[real_col].dropna()
+    #     if hasattr(self, 'real_mag_data') and real_col in self.real_mag_data.columns:
+    #         has_cal = True
+    #         cal_data = self.real_mag_data[real_col].dropna()
             
          
-            cal_rms = np.nanstd(cal_data) 
-            y_label_right = 'Apparent Magnitude (mag)'
+    #         cal_rms = np.nanstd(cal_data) 
+    #         y_label_right = 'Apparent Magnitude (mag)'
             
-        elif 'exposure_corr' in self.data.columns:
+    #     elif 'exposure_corr' in self.data.columns:
 
-            has_cal = True
-            cal_data = self.df_keep[raw_col] - self.data['exposure_corr']
-            cal_data = cal_data.dropna()
-            cal_data = cal_data - cal_data.median()
-            cal_rms = np.nanstd(cal_data)
-            y_label_right = 'Relative Magnitude (Calibrated)'
-            print(" กราฟขวาแสดงผลแบบ Relative (ยังไม่ได้ใส่ Zero Point offset)")
-        else:
-            has_cal = False
-            print(" ยังไม่ได้รัน solve_ensemble")
+    #         has_cal = True
+    #         cal_data = self.df_keep[raw_col] - self.data['exposure_corr']
+    #         cal_data = cal_data.dropna()
+    #         cal_data = cal_data - cal_data.median()
+    #         cal_rms = np.nanstd(cal_data)
+    #         y_label_right = 'Relative Magnitude (Calibrated)'
+    #         print(" กราฟขวาแสดงผลแบบ Relative (ยังไม่ได้ใส่ Zero Point offset)")
+    #     else:
+    #         has_cal = False
+    #         print(" ยังไม่ได้รัน solve_ensemble")
         
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 6)) # ห้ามใส่ sharey=True เพราะแกน Y ไม่เท่ากันแล้ว
+    #     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 6)) # ห้ามใส่ sharey=True เพราะแกน Y ไม่เท่ากันแล้ว
 
-        ax1.scatter(raw_data.index, raw_norm, s=10, color='gray', alpha=0.5, label='Raw Data')
-        ax1.set_title(f'BEFORE: Raw Star {star_id}\nRMS = {raw_rms:.4f}', fontsize=14, fontweight='bold', color='darkred')
-        ax1.set_ylabel('Relative Magnitude (Raw)', fontsize=12)
-        ax1.set_xlabel('Frame Number', fontsize=12)
-        ax1.invert_yaxis()
-        ax1.grid(True, ls=':', alpha=0.6)
+    #     ax1.scatter(raw_data.index, raw_norm, s=10, color='gray', alpha=0.5, label='Raw Data')
+    #     ax1.set_title(f'BEFORE: Raw Star {star_id}\nRMS = {raw_rms:.4f}', fontsize=14, fontweight='bold', color='darkred')
+    #     ax1.set_ylabel('Relative Magnitude (Raw)', fontsize=12)
+    #     ax1.set_xlabel('Frame Number', fontsize=12)
+    #     ax1.invert_yaxis()
+    #     ax1.grid(True, ls=':', alpha=0.6)
 
-        #  (Calibrated + Offset)
-        if has_cal:
-            ax2.scatter(cal_data.index, cal_data, s=10, color='royalblue', alpha=0.8, label='Ensemble + ZP')
-            ax2.set_title(f'AFTER: Apparent Mag Star {star_id}\nRMS = {cal_rms:.4f}', fontsize=14, fontweight='bold', color='darkgreen')
-            ax2.set_ylabel(y_label_right, fontsize=12)
+    #     #  (Calibrated + Offset)
+    #     if has_cal:
+    #         ax2.scatter(cal_data.index, cal_data, s=10, color='royalblue', alpha=0.8, label='Ensemble + ZP')
+    #         ax2.set_title(f'AFTER: Apparent Mag Star {star_id}\nRMS = {cal_rms:.4f}', fontsize=14, fontweight='bold', color='darkgreen')
+    #         ax2.set_ylabel(y_label_right, fontsize=12)
             
-            improvement = (1 - (cal_rms / raw_rms)) * 100
-            ax2.text(0.05, 0.95, f'Improvement: {improvement:.1f}%', transform=ax2.transAxes, 
-                     verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        else:
-            ax2.text(0.5, 0.5, 'NO DATA', ha='center', va='center', fontsize=16, color='red')
+    #         improvement = (1 - (cal_rms / raw_rms)) * 100
+    #         ax2.text(0.05, 0.95, f'Improvement: {improvement:.1f}%', transform=ax2.transAxes, 
+    #                  verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    #     else:
+    #         ax2.text(0.5, 0.5, 'NO DATA', ha='center', va='center', fontsize=16, color='red')
 
-        ax2.set_xlabel('Frame Number', fontsize=12)
-        if has_cal: ax2.invert_yaxis()
-        ax2.grid(True, ls=':', alpha=0.6)
+    #     ax2.set_xlabel('Frame Number', fontsize=12)
+    #     if has_cal: ax2.invert_yaxis()
+    #     ax2.grid(True, ls=':', alpha=0.6)
 
-        fig.suptitle(f'Photometry Results: Star {star_id}', fontsize=18, y=1.05)
-        plt.tight_layout()
-        plt.show()
+    #     fig.suptitle(f'Photometry Results: Star {star_id}', fontsize=18, y=1.05)
+    #     plt.tight_layout()
+    #     plt.show()
         
 
-    def get_real_mags_for_all(self, ref_star_id, catalog_mag):
+    # def get_real_mags_for_all(self, ref_star_id, catalog_mag):
     
-        inst_col = f'instrumag_{ref_star_id}'
-        if inst_col not in self.data.columns:
-            print(f"star {ref_star_id} was Filter")
-            return None
+    #     inst_col = f'instrumag_{ref_star_id}'
+    #     if inst_col not in self.data.columns:
+    #         print(f"star {ref_star_id} was Filter")
+    #         return None
             
 
-        corrected_ref_mag = self.data[inst_col] - self.data['exposure_corr']
-        zp = catalog_mag - corrected_ref_mag.median()
-        print(f" Zero Point calculated from Star {ref_star_id}: {zp:.4f}")
+    #     corrected_ref_mag = self.data[inst_col] - self.data['exposure_corr']
+    #     zp = catalog_mag - corrected_ref_mag.median()
+    #     print(f" Zero Point calculated from Star {ref_star_id}: {zp:.4f}")
 
 
-        mag_cols = [c for c in self.df_keep.columns if c.startswith('instrumag_')]
-        real_mag_df = pd.DataFrame(index=self.df_keep.index)
+    #     mag_cols = [c for c in self.df_keep.columns if c.startswith('instrumag_')]
+    #     real_mag_df = pd.DataFrame(index=self.df_keep.index)
         
-        if 'MJD' in self.df_keep.columns:
-            real_mag_df['MJD'] = self.df_keep['MJD']
-        elif 'BJD' in self.df_keep.columns:
-             real_mag_df['BJD'] = self.df_keep['BJD']
-        else:
-             real_mag_df['time'] = self.df_keep.index
+    #     if 'MJD' in self.df_keep.columns:
+    #         real_mag_df['MJD'] = self.df_keep['MJD']
+    #     elif 'BJD' in self.df_keep.columns:
+    #          real_mag_df['BJD'] = self.df_keep['BJD']
+    #     else:
+    #          real_mag_df['time'] = self.df_keep.index
 
-        for col in mag_cols:
-            star_id = col.split('_')[-1]
-            real_mag_df[f'realmag_{star_id}'] = self.df_keep[col] - self.data['exposure_corr'] + zp
+    #     for col in mag_cols:
+    #         star_id = col.split('_')[-1]
+    #         real_mag_df[f'realmag_{star_id}'] = self.df_keep[col] - self.data['exposure_corr'] + zp
             
 
 
-        self.real_mag_data = real_mag_df
-        return real_mag_df
+    #     self.real_mag_data = real_mag_df
+    #     return real_mag_df
 
 
 
@@ -705,9 +739,111 @@ class Ensemble():
             print(f" Saved comparison plot to: {save_name}")
      
         plt.show()
+
+
+    def save_results(self):
+
+        # 1. Check data readiness
+        if 'exposure_corr' not in self.data.columns:
+            print("Warning: 'exposure_corr' not found. Please run solve_ensemble() first.")
+            return
+
+        # 2. Copy time and environment columns
+        time_cols = [c for c in ['MJD', 'BJD', 'Exptim', 'secz'] if c in self.df_keep.columns]
+        df_out = self.df_keep[time_cols].copy()
         
+        # Store atmospheric correction
+        df_out['exposure_corr'] = self.data['exposure_corr']
+
+        # 3. Loop to calculate Calibrated Magnitude
+        mag_cols = [c for c in self.df_keep.columns if c.startswith('instrumag_')]
+
+        for col in mag_cols:
+            star_id = col.split('_')[-1]
+            err_col = f'einstrumag_{star_id}'
+
+            # Calibrated Mag = Raw Mag - Atmosphere 
+            df_out[f'mag_{star_id}'] = self.df_keep[col] - self.data['exposure_corr']
+
+            # Copy corresponding error values
+            if err_col in self.df_keep.columns:
+                df_out[f'emag_{star_id}'] = self.df_keep[err_col]
+
+        # 4. Save everything to a single file
+        csv_path = os.path.join(self.save_path , 'calibrated_lightcurves.txt')
         
-    # def run(self, logfile, target_rms=0.02, numstars=15, target_id, ref_star_id):
+        with open(csv_path, 'w') as f:
+            # Header: Write reference stars as a comment
+            if hasattr(self, 'surviving_stars') and self.surviving_stars:
+                f.write("# The following stars survived all filtering and were used as the ensemble reference:\n")
+                f.write("# " + ", ".join(self.surviving_stars) + "\n")
+            else:
+                f.write("# Warning: No reference stars found.\n")
+                
+            # Table: Append pandas dataframe to the open file
+            df_out.to_csv(f, index=False)
+            
+        print(f"Success: Saved calibrated data and reference stars to a single file: {csv_path}")
+
+    # def save_calibrated_data(self, folder_path):
+    #     import os
+    #     if not hasattr(self, 'real_mag_data'):
+    #         return
+
+    #     filename = "calibrated_lightcurves.csv"
+    #     full_path = os.path.join(folder_path, filename)
+
+    #     try:
+
+    #         self.real_mag_data.to_csv(full_path, index=False)
+    #         print(f"save to {full_path}")
+    #     except Exception as e:
+    #         print(f"error: {e}")
+    
+    def plot_rms_history(self, target_rms=None, save_folder=None):
+        import matplotlib.pyplot as plt
+        import os
+
+        # Check if the history exists
+        if not hasattr(self, 'rms_history') or not self.rms_history:
+            print(" No RMS history found. Did you run the pipeline yet?")
+            return
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # X-axis will just be the iteration numbers (1, 2, 3...)
+        iterations = range(1, len(self.rms_history) + 1)
+        
+        # Plot the descending RMS curve
+        ax.plot(iterations, self.rms_history, marker='o', linestyle='-', 
+                color='indigo', linewidth=2, markersize=8, alpha=0.8,
+                label='Ensemble RMS')
+        
+        # Overlay the target threshold if provided
+        if target_rms is not None:
+            ax.axhline(target_rms, color='crimson', linestyle='--', linewidth=2, 
+                       alpha=0.8, label=f'Target RMS ({target_rms})')
+            ax.legend(fontsize=12)
+
+        # Formatting
+        ax.set_title('Pipeline Convergence: Ensemble RMS per Iteration', fontsize=16, fontweight='bold')
+        ax.set_xlabel('Cleaning Iteration', fontsize=12)
+        ax.set_ylabel('Global RMS (mag)', fontsize=12)
+        ax.grid(True, linestyle=':', alpha=0.7)
+        
+        # Force the X-axis to only show whole numbers (no 1.5 iterations)
+        ax.set_xticks(iterations)
+
+        # Save logic
+        if save_folder:
+            save_name = os.path.join(save_folder, 'rms_convergence_history.png')
+            plt.savefig(save_name, dpi=300, bbox_inches='tight')
+            print(f" Saved RMS history plot to: {save_name}")
+
+        plt.tight_layout()
+        plt.show()
+
+
     def run(self, logfile, target_rms=0.02, numstars=12, ignor_stars = None):
         self.data = pd.DataFrame()        
         self.read_log_file(logfile=logfile, instrument="hcam")
@@ -754,10 +890,8 @@ class Ensemble():
                 print("Less than 2 stars remaining — stopping.")
                 break
                     # --- record this iteration ---
-            
-            
-            r, self.data= self.solve_ensemble(self.data)
-
+            self.iteration_counter = iteration
+            r, self.data = self.solve_ensemble(self.data)
             star_sd = np.nanstd(r, axis=0)
             current_rms = np.sqrt(np.nanmean(r**2))
             
@@ -805,105 +939,5 @@ class Ensemble():
         self.surviving_stars = [c.split('_')[-1] for c in self.surviving_cols] #
         self.save_results()
         return 
+
         
-    def save_results(self):
-
-        # 1. Check data readiness
-        if 'exposure_corr' not in self.data.columns:
-            print("Warning: 'exposure_corr' not found. Please run solve_ensemble() first.")
-            return
-
-        # 2. Copy time and environment columns
-        time_cols = [c for c in ['MJD', 'BJD', 'Exptim', 'secz'] if c in self.df_keep.columns]
-        df_out = self.df_keep[time_cols].copy()
-        
-        # Store atmospheric correction
-        df_out['exposure_corr'] = self.data['exposure_corr']
-
-        # 3. Loop to calculate Calibrated Magnitude
-        mag_cols = [c for c in self.df_keep.columns if c.startswith('instrumag_')]
-
-        for col in mag_cols:
-            star_id = col.split('_')[-1]
-            err_col = f'einstrumag_{star_id}'
-
-            # Calibrated Mag = Raw Mag - Atmosphere 
-            df_out[f'mag_{star_id}'] = self.df_keep[col] - self.data['exposure_corr']
-
-            # Copy corresponding error values
-            if err_col in self.df_keep.columns:
-                df_out[f'emag_{star_id}'] = self.df_keep[err_col]
-
-        # 4. Save everything to a single file
-        csv_path = os.path.join(self.save_path , 'calibrated_lightcurves.txt')
-        
-        with open(csv_path, 'w') as f:
-            # Header: Write reference stars as a comment
-            if hasattr(self, 'surviving_stars') and self.surviving_stars:
-                f.write("# The following stars survived all filtering and were used as the ensemble reference:\n")
-                f.write("# " + ", ".join(self.surviving_stars) + "\n")
-            else:
-                f.write("# Warning: No reference stars found.\n")
-                
-            # Table: Append pandas dataframe to the open file
-            df_out.to_csv(f, index=False)
-            
-        print(f"Success: Saved calibrated data and reference stars to a single file: {csv_path}")
-
-    def save_calibrated_data(self, folder_path):
-        import os
-        if not hasattr(self, 'real_mag_data'):
-            return
-
-        filename = "calibrated_lightcurves.csv"
-        full_path = os.path.join(folder_path, filename)
-
-        try:
-
-            self.real_mag_data.to_csv(full_path, index=False)
-            print(f"save to {full_path}")
-        except Exception as e:
-            print(f"error: {e}")
-    
-    def plot_rms_history(self, target_rms=None, save_folder=None):
-        import matplotlib.pyplot as plt
-        import os
-
-        # Check if the history exists
-        if not hasattr(self, 'rms_history') or not self.rms_history:
-            print(" No RMS history found. Did you run the pipeline yet?")
-            return
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        # X-axis will just be the iteration numbers (1, 2, 3...)
-        iterations = range(1, len(self.rms_history) + 1)
-        
-        # Plot the descending RMS curve
-        ax.plot(iterations, self.rms_history, marker='o', linestyle='-', 
-                color='indigo', linewidth=2, markersize=8, alpha=0.8,
-                label='Ensemble RMS')
-        
-        # Overlay the target threshold if provided
-        if target_rms is not None:
-            ax.axhline(target_rms, color='crimson', linestyle='--', linewidth=2, 
-                       alpha=0.8, label=f'Target RMS ({target_rms})')
-            ax.legend(fontsize=12)
-
-        # Formatting
-        ax.set_title('Pipeline Convergence: Ensemble RMS per Iteration', fontsize=16, fontweight='bold')
-        ax.set_xlabel('Cleaning Iteration', fontsize=12)
-        ax.set_ylabel('Global RMS (mag)', fontsize=12)
-        ax.grid(True, linestyle=':', alpha=0.7)
-        
-        # Force the X-axis to only show whole numbers (no 1.5 iterations)
-        ax.set_xticks(iterations)
-
-        # Save logic
-        if save_folder:
-            save_name = os.path.join(save_folder, 'rms_convergence_history.png')
-            plt.savefig(save_name, dpi=300, bbox_inches='tight')
-            print(f" Saved RMS history plot to: {save_name}")
-
-        plt.tight_layout()
-        plt.show()
