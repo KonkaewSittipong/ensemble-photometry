@@ -642,7 +642,7 @@ class Ensemble():
 
 
 
-    def plot_all_comparison_lr(self, save_folder=None, all_stars = True, xlim=None):
+    def plot_all_comparison_lr(self, all_stars = True, xlim=None):
         if all_stars :
             mag_cols = [c for c in self.df_keep.columns if c.startswith('instrumag_')]
         else:
@@ -733,13 +733,24 @@ class Ensemble():
         fig.suptitle('Global Photometry Comparison with Star Labels', fontsize=18, y=0.98)
         
         plt.tight_layout(rect=[0, 0, 0.9, 1]) 
-        if save_folder:
-            save_name = os.path.join(save_folder, 'all_stars_comparison.png')
+        out_dir = save_folder if save_folder else getattr(self, 'figs_dir', self.save_path)
+
+        if out_dir:
+            save_name = os.path.join(out_dir, 'all_stars_comparison.png')
             plt.savefig(save_name, dpi=300, bbox_inches='tight')
-            print(f" Saved comparison plot to: {save_name}")
-     
+            print(f"Saved comparison plot to: {save_name}")
+        else:
+            print("Warning: No save path found. Plot not saved.")
+
         plt.show()
 
+        
+        # if self.save_path:
+        #     save_name = os.path.join(save_folder, 'stars_comparison.png')
+        #     plt.savefig(save_name, dpi=300, bbox_inches='tight')
+        #     print(f" Saved comparison plot to: {save_name}")
+     
+        # plt.show()
 
     def save_results(self):
 
