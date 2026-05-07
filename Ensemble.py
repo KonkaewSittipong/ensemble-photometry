@@ -11,44 +11,146 @@ def weighted_mean(values, weights,axis=None):
 
 
 class Ensemble():
-    def __init__(self, config=None, save_path = None, diagnostics = False,):
-        self.save_path = save_path
+    def __init__(self, config=None, save_path=None, diagnostics=False):
+        # 1. Clean path and initialize variables
+        self.save_path = save_path.strip() if save_path else None
         self.diagnostics = diagnostics
         self.open_df = pd.DataFrame()
         self.lines = []
         
-        # self.location = 'TNO' #None    #site name or 'Alt Az Elv'
+        # Site and Source Settings
         self.location = co.EarthLocation.of_site('TNO')
         self.src_pos = co.SkyCoord('06 45 08.92 -16 42 58.0', unit=(u.hourangle, u.deg))
         self.exc_frame = None
         self.sigma_clip = 3
-        self.diagnostics = diagnostics
         
         if config:
             self.read_config_file(config)
             
-        if save_path :
+        # 2. Setup directories if save_path is provided
+        if self.save_path:
             self.save_path, self.figs_dir = self.makedir()
 
-
-            
     def makedir(self):
-            base_name = "run"
-            existing_runs = glob.glob(f"{base_name}[0-9][0-9][0-9]")
+        """Creates an incremental run directory (run001, run002, etc.)"""
+        # Ensure base save_path exists
+        if not os.path.exists(self.save_path):
+            os.makedirs(self.save_path, exist_ok=True)
             
-            if not existing_runs:
-                next_run_num = 1
-            else:
-                run_numbers = [int(r.replace(base_name, "")) for r in existing_runs]
-                next_run_num = max(run_numbers) + 1
+        base_name = "run"
+        # Search for existing runs INSIDE the target save_path
+        search_pattern = os.path.join(self.save_path, f"{base_name}[0-9][0-9][0-9]")
+        existing_runs = glob.glob(search_pattern)
+        
+        if not existing_runs:
+            next_run_num = 1
+        else:
+            # Extract numbers from folder names
+            run_numbers = [int(os.path.basename(r).replace(base_name, "")) for r in existing_runs]
+            next_run_num = max(run_numbers) + 1
+            
+        current_run_dir = os.path.join(self.save_path, f"{base_name}{next_run_num:03d}")
+        figs_dir = os.path.join(current_run_dir, "figs")
+        
+        # Create directories
+        os.makedirs(figs_dir, exist_ok=True)
+        print(f"[New Experiment] Created directory: {current_run_dir}")
+        
+        return current_run_dir, figs_dir
+
+    # ... keep your other methods (read_config_file, read_log_file, etc.) aligned with 'def makedir'
+
+    
+# class Ensemble():
+#     def __init__(self, config=None, save_path = None, diagnostics = False,):
+#         self.save_path = save_path
+#         self.diagnostics = diagnostics
+#         self.open_df = pd.DataFrame()
+#         self.lines = []
+        
+#         # self.location = 'TNO' #None    #site name or 'Alt Az Elv'
+#         self.location = co.EarthLocation.of_site('TNO')
+#         self.src_pos = co.SkyCoord('06 45 08.92 -16 42 58.0', unit=(u.hourangle, u.deg))
+#         self.exc_frame = None
+#         self.sigma_clip = 3
+#         self.diagnostics = diagnostics
+        
+#         if config:
+#             self.read_config_file(config)
+            
+#         if save_path :
+#             self.save_path, self.figs_dir = self.makedir()
+#                 # Inside your loop or __init__
+#        def makedir(self):
+#         # Ensure path exists before globbing
+#             if not os.path.exists(self.save_path):
+#                 os.makedirs(self.save_path, exist_ok=True)
+    
+#             base_name = "run"
+#             # Search for existing runs INSIDE the target save_path
+#             search_pattern = os.path.join(self.save_path, f"{base_name}[0-9][0-9][0-9]")
+#             existing_runs = glob.glob(search_pattern)
+            
+#             if not existing_runs:
+#                 next_run_num = 1
+#             else:
+#                 # basename handles the full path correctly
+#                 run_numbers = [int(os.path.basename(r).replace(base_name, "")) for r in existing_runs]
+#                 next_run_num = max(run_numbers) + 1
                 
-            current_run_dir = f"{base_name}{next_run_num:03d}"
-            figs_dir = os.path.join(current_run_dir, "figs")
+#             current_run_dir = os.path.join(self.save_path, f"{base_name}{next_run_num:03d}")
+#             figs_dir = os.path.join(current_run_dir, "figs")
             
-            os.makedirs(figs_dir, exist_ok=True)
-            print(f"[New Experiment] Created directory: {current_run_dir}")
+#             # Create the new run directory and the figs subdirectory
+#             os.makedirs(figs_dir, exist_ok=True)
+#             print(f"[New Experiment] Created directory: {current_run_dir}")
             
-            return current_run_dir, figs_dir
+#         return current_run_dir, figs_dir
+
+#     def makedir(self):
+#             """Creates an incremental run directory (run001, run002, etc.)"""
+#             # Ensure base save_path exists
+#             if not os.path.exists(self.save_path):
+#                 os.makedirs(self.save_path, exist_ok=True)
+                
+#             base_name = "run"
+#             # Search for existing runs INSIDE the target save_path
+#             search_pattern = os.path.join(self.save_path, f"{base_name}[0-9][0-9][0-9]")
+#             existing_runs = glob.glob(search_pattern)
+            
+#             if not existing_runs:
+#                 next_run_num = 1
+#             else:
+#                 # Extract numbers from folder names
+#                 run_numbers = [int(os.path.basename(r).replace(base_name, "")) for r in existing_runs]
+#                 next_run_num = max(run_numbers) + 1
+                
+#             current_run_dir = os.path.join(self.save_path, f"{base_name}{next_run_num:03d}")
+#             figs_dir = os.path.join(current_run_dir, "figs")
+            
+#             # Create directories
+#             os.makedirs(figs_dir, exist_ok=True)
+#             print(f"[New Experiment] Created directory: {current_run_dir}")
+            
+#             return current_run_dir, figs_dir
+        
+    # def makedir(self):
+    #         base_name = "run"
+    #         existing_runs = glob.glob(f"{base_name}[0-9][0-9][0-9]")
+            
+    #         if not existing_runs:
+    #             next_run_num = 1
+    #         else:
+    #             run_numbers = [int(r.replace(base_name, "")) for r in existing_runs]
+    #             next_run_num = max(run_numbers) + 1
+                
+    #         current_run_dir = f"{base_name}{next_run_num:03d}"
+    #         figs_dir = os.path.join(current_run_dir, "figs")
+            
+    #         os.makedirs(figs_dir, exist_ok=True)
+    #         print(f"[New Experiment] Created directory: {current_run_dir}")
+            
+    #         return current_run_dir, figs_dir
     
     def read_config_file(self, config):
         try:
@@ -83,10 +185,7 @@ class Ensemble():
             elif par.lower() == 'pos':
                 self.src_pos = co.SkyCoord(' '.join(line.split()[1:]),
                                            unit=(u.hourangle,u.deg))
-
-
-
-                
+       
         except FileNotFoundError:
             print(f"Error: Config file {config} not found.")
 
